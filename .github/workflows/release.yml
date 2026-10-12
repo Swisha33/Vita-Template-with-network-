@@ -1,0 +1,33 @@
+name: Publish template
+
+# Every push to main publishes the vita_release.zip in this repo as the release
+# "latest", so builds can download it from a fixed URL:
+#   https://github.com/<owner>/<repo>/releases/download/latest/vita_release.zip
+
+on:
+  push:
+    branches: [main]
+    paths: ["vita_release.zip", ".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checksum
+        run: sha256sum vita_release.zip | tee SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Godot 3.5 PS Vita export template with network
+          body: |
+            Godot 3.5 PS Vita export template (vita_release.zip) built from SonicMastr/godot-vita
+            with sockets enabled, so HTTPClient, HTTPRequest, StreamPeerTCP, PacketPeerUDP and
+            WebSocket work on the Vita (plain TCP/UDP/HTTP; no HTTPS/TLS). See the README.
+          files: |
+            vita_release.zip
+            SHA256SUMS.txt

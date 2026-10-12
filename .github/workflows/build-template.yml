@@ -1,0 +1,78 @@
+name: Build Vita template (with network) from source
+
+# Rebuilds vita_release.zip from SonicMastr/godot-vita (pinned commit below) with the
+# network (sockets) code enabled. The prebuilt 3.5-rc5-vita1 template from the godot-vita
+# releases was compiled with -DUNIX_SOCKET_UNAVAILABLE, so games can't open any connection.
+# Takes 1-2 hours. Run it by hand: Actions > Build Vita template ... > Run workflow.
+# The result is published as the release "template-from-source"; to make it the main
+# download, commit that vita_release.zip to the repo root (release.yml republishes it).
+
+on:
+  workflow_dispatch:
+
+env:
+  GODOT_VITA_REF: fee5c312f9dc7f950cc7f3168def2e1bb650d23c
+  VITASDK: /usr/local/vitasdk
+
+permissions:
+  contents: write
+
+jobs:
+  template:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: SonicMastr/godot-vita
+          ref: ${{ env.GODOT_VITA_REF }}
+          path: godot-vita
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: scons
+        run: python -m pip install scons==4.7.0
+
+      - name: VitaSDK
+        run: |
+          fail() { echo "::error::FAILED at: $1 :: $(tail -c 600 /tmp/step.log | tr '\n' '|')"; exit 1; }
+          run() { echo ">> $*"; "$@" > /tmp/step.log 2>&1 || fail "$*"; }
+          sudo chown $USER /usr/local
+          run sudo apt-get update
+          run sudo apt-get install -y cmake libarchive-tools fakeroot zip
+          run git clone https://github.com/vitasdk/vdpm
+          (cd vdpm && git checkout e423be4)
+          run git clone https://github.com/isage/vita-packages-extra
+          cd vdpm
+          run ./bootstrap-vitasdk.sh
+          export PATH=$VITASDK/bin:$PATH
+          run ./install-all.sh
+          run vdpm vita-rss-libdl
+          cd ../vita-packages-extra/pvr_psp2
+          run vita-makepkg
+          run vdpm *-arm.tar.xz
+
+      - name: Compile template
+        working-directory: godot-vita
+        run: |
+          export PATH=$VITASDK/bin:$PATH
+          scons p=vita target=release tools=no tests=no verbose=yes warnings=all werror=no debug_symbols=no
+          ls -l bin/
+
+      - name: Check that sockets are in
+        working-directory: godot-vita
+        run: |
+          unzip -p bin/vita_release.zip eboot.bin > /tmp/eboot.bin
+          strings /tmp/eboot.bin | grep -c -i "sceNetSocket\|sceNetConnect" || true
+
+      - name: Publish as release "vita-template"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: template-from-source
+          name: Vita template with network (built from source)
+          body: Godot Vita export template built from SonicMastr/godot-vita ${{ env.GODOT_VITA_REF }} with sockets enabled. Used by the build workflow.
+          files: godot-vita/bin/vita_release.zip
